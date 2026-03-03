@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="public/logo.png" alt="ViperGrid Logo" width="200"/>
+  <img src="public/logo.png" alt="ViperGrid Logo" width="250"/>
 </p>
 
 # ViperGame - Claude 4.5 Sonnet Capability Test
