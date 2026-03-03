@@ -123,7 +123,7 @@ export class Game {
   }
 
   private setupPerformanceMonitoring(): void {
-    const statsElement = this.stats.domElement;
+    const statsElement = this.stats.domElement as HTMLDivElement;
 
     // Remove from DOM first (Stats constructor auto-appends it)
     if (statsElement.parentNode) {
@@ -163,7 +163,7 @@ export class Game {
     this.showStats = !this.showStats;
     console.log("📊 Stats toggled:", this.showStats ? "ON" : "OFF");
 
-    const statsElement = this.stats.domElement;
+    const statsElement = this.stats.domElement as HTMLDivElement;
     console.log("📊 Stats element:", statsElement);
 
     if (this.showStats) {

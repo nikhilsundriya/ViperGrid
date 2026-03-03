@@ -65,7 +65,7 @@ export class GameOverScreen {
       distance: 25,
     });
 
-    this.titleText.filters = [this.glowFilter];
+    this.titleText.filters = [this.glowFilter as any];
 
     // SCORE
     this.scoreText = new Text({

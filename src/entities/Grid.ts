@@ -44,15 +44,16 @@ export class Grid {
   }
 
   private addNeonGlow(): void {
-    const glow = new GlowFilter({
-      color: 0x00f5ff,
-      outerStrength: 2,
-      innerStrength: 0,
-      distance: 15
-    });
+  const glow = new GlowFilter({
+    color: 0x00f5ff,
+    outerStrength: 2,
+    innerStrength: 0,
+    distance: 15
+  });
 
-    this.gridGraphics.filters = [glow];
-  }
+  // Cast to any to fix Pixi v8 type mismatch
+  this.gridGraphics.filters = [glow as any];
+}
 
   // 🔥 Subtle pulse animation
   public update(deltaMS: number): void {
