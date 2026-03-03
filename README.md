@@ -1,4 +1,8 @@
-# 🐍 ViperGame - Claude 4.5 Sonnet Capability Test
+<p align="center">
+  <img src="assets/logo.png" alt="ViperGrid Logo" width="200"/>
+</p>
+
+# ViperGame - Claude 4.5 Sonnet Capability Test
 
 > **A fully vibe-coded project testing Claude 4.5 Sonnet's capabilities with Cursor** 🧪  
 > This is an experimental project to explore AI-assisted game development workflows!
