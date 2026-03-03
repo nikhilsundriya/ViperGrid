@@ -1,0 +1,579 @@
+import { Application, Ticker, Graphics, Container } from "pixi.js";
+import { Stats } from "pixi-stats";
+import { Grid } from "../entities/Grid";
+import { Viper} from "../entities/Viper";
+import { Food } from "../entities/Food";
+import { InputSystem } from "../systems/InputSystem";
+import { CollisionSystem } from "../systems/CollisionSystem";
+import { ScoreSystem } from "../systems/ScoreSystem";
+import { AudioSystem } from "../systems/AudioSystem";
+import { HUD } from "../ui/HUD";
+import { MenuScreen } from "../ui/MenuScreen";
+import { PauseScreen } from "../ui/PauseScreen";
+import { GameOverScreen } from "../ui/GameOverScreen";
+import { TouchControlsDOM } from "../ui/TouchControlsDOM";
+import { GameState } from "./GameState";
+import { ParticlePool } from "../utils/ParticlePool";
+import {
+  GameStates,
+  INITIAL_MOVE_INTERVAL,
+  MIN_MOVE_INTERVAL,
+  FOOD_SPEED_THRESHOLD,
+  CELL_SIZE,
+  CANVAS_WIDTH,
+  CANVAS_HEIGHT,
+} from "../utils/Constants";
+
+export class Game {
+  private app: Application;
+  private gameState: GameState;
+
+  // Entities
+  private grid: Grid;
+  private viper: Viper;
+  private food: Food;
+
+  // Systems
+  private inputSystem: InputSystem;
+  private collisionSystem: CollisionSystem;
+  private scoreSystem: ScoreSystem;
+  private audioSystem: AudioSystem;
+  private particlePool: ParticlePool;
+
+  // UI
+  private hud: HUD;
+  private menuScreen: MenuScreen;
+  private pauseScreen: PauseScreen;
+  private gameOverScreen: GameOverScreen;
+  private touchControls: TouchControlsDOM;
+
+  // Performance monitoring
+  private stats: Stats;
+  private showStats: boolean;
+
+  // Game loop variables
+  private elapsed: number;
+  private moveInterval: number;
+  private foodCount: number;
+
+  // Screen effects
+  private gameContainer: Container;
+  private flashOverlay: Graphics;
+  private fadeOverlay: Graphics;
+  private screenShake: {
+    active: boolean;
+    duration: number;
+    intensity: number;
+    elapsed: number;
+  };
+
+  constructor(app: Application) {
+    this.app = app;
+    this.gameState = new GameState(GameStates.MENU);
+
+    // Initialize entities
+    this.grid = new Grid();
+    this.viper= new Viper();
+    this.food = new Food();
+
+    // Initialize systems
+    this.inputSystem = new InputSystem();
+    this.collisionSystem = new CollisionSystem();
+    this.scoreSystem = new ScoreSystem();
+    this.audioSystem = new AudioSystem();
+    this.particlePool = new ParticlePool();
+
+    // Initialize UI
+    this.hud = new HUD();
+    this.menuScreen = new MenuScreen();
+    this.pauseScreen = new PauseScreen();
+    this.gameOverScreen = new GameOverScreen();
+    this.touchControls = new TouchControlsDOM();
+
+    // Initialize performance monitoring
+    this.showStats = import.meta.env.DEV; // Show in dev mode by default
+    this.stats = new Stats(this.app.renderer);
+    // this.setupPerformanceMonitoring();
+
+    // Game loop variables
+    this.elapsed = 0;
+    this.moveInterval = INITIAL_MOVE_INTERVAL;
+    this.foodCount = 0;
+
+    // Initialize screen effects
+    this.gameContainer = new Container();
+    this.flashOverlay = new Graphics();
+    this.fadeOverlay = new Graphics();
+    this.screenShake = {
+      active: false,
+      duration: 0,
+      intensity: 0,
+      elapsed: 0,
+    };
+
+    this.setupScene();
+    this.setupScreenEffects();
+    this.setupGameStateListeners();
+    this.setupInputHandlers();
+    this.setupTouchControls();
+    this.startGameLoop();
+
+    // Update menu with current high score
+    this.menuScreen.updateHighScore(this.scoreSystem.getHighScore());
+  }
+
+  private setupPerformanceMonitoring(): void {
+    const statsElement = this.stats.domElement;
+
+    // Remove from DOM first (Stats constructor auto-appends it)
+    if (statsElement.parentNode) {
+      statsElement.parentNode.removeChild(statsElement);
+    }
+
+    // Always set up positioning (even if hidden initially)
+    this.positionStatsElement(statsElement);
+
+    // Only add to DOM if showStats is true
+    if (this.showStats) {
+      document.body.appendChild(statsElement);
+    }
+  }
+
+  private positionStatsElement(element: HTMLElement): void {
+    // Keep original 'stats' ID but add class for CSS targeting
+    element.id = "stats";
+    element.classList.add("pixi-stats");
+
+    // Position stats in top-left corner with fixed positioning
+    element.style.cssText = `
+      position: fixed !important;
+      top: 10px !important;
+      left: 10px !important;
+      right: auto !important;
+      bottom: auto !important;
+      z-index: 9999 !important;
+      opacity: 0.85 !important;
+      transform: scale(0.7) !important;
+      transform-origin: top left !important;
+      pointer-events: none !important;
+    `;
+  }
+
+  public toggleStats(): void {
+    this.showStats = !this.showStats;
+    console.log("📊 Stats toggled:", this.showStats ? "ON" : "OFF");
+
+    const statsElement = this.stats.domElement;
+    console.log("📊 Stats element:", statsElement);
+
+    if (this.showStats) {
+      this.positionStatsElement(statsElement);
+      document.body.appendChild(statsElement);
+      console.log(
+        "📊 Stats added to DOM at position:",
+        window.getComputedStyle(statsElement).left,
+        window.getComputedStyle(statsElement).top
+      );
+    } else {
+      if (statsElement.parentNode) {
+        statsElement.parentNode.removeChild(statsElement);
+      }
+      console.log("📊 Stats removed from DOM");
+    }
+  }
+
+  private setupScene(): void {
+    // Add game elements to game container for shake effect
+    this.gameContainer.addChild(this.grid.container);
+    this.gameContainer.addChild(this.viper.container);
+    this.gameContainer.addChild(this.food.container);
+    this.gameContainer.addChild(this.particlePool.getContainer());
+
+    // Mark game container as render group for better batching
+    this.gameContainer.isRenderGroup = true;
+
+    // Add containers to stage
+    this.app.stage.addChild(this.gameContainer);
+    this.app.stage.addChild(this.hud.container);
+    this.app.stage.addChild(this.menuScreen.container);
+    this.app.stage.addChild(this.pauseScreen.container);
+    this.app.stage.addChild(this.gameOverScreen.container);
+
+    // Mark UI containers as render groups for better batching
+    this.hud.container.isRenderGroup = true;
+    this.menuScreen.container.isRenderGroup = true;
+    this.pauseScreen.container.isRenderGroup = true;
+    this.gameOverScreen.container.isRenderGroup = true;
+  }
+
+  private setupScreenEffects(): void {
+    // Setup flash overlay (white flash)
+    this.flashOverlay.rect(0, 0, CANVAS_WIDTH, CANVAS_HEIGHT);
+    this.flashOverlay.fill({ color: 0xffffff, alpha: 0 });
+    this.app.stage.addChild(this.flashOverlay);
+
+    // Setup fade overlay (black fade)
+    this.fadeOverlay.rect(0, 0, CANVAS_WIDTH, CANVAS_HEIGHT);
+    this.fadeOverlay.fill({ color: 0x000000, alpha: 0 });
+    this.app.stage.addChild(this.fadeOverlay);
+  }
+
+  private setupGameStateListeners(): void {
+    this.gameState.onStateChange(GameStates.MENU, () => {
+      this.menuScreen.show();
+      this.pauseScreen.hide();
+      this.gameOverScreen.hide();
+      this.touchControls.hide();
+      this.fadeIn(500);
+
+      // Stop background music on menu
+      this.audioSystem.stopBackgroundMusic();
+    });
+
+    this.gameState.onStateChange(GameStates.PLAYING, () => {
+      this.menuScreen.hide();
+      this.pauseScreen.hide();
+      this.gameOverScreen.hide();
+      this.touchControls.show();
+      this.fadeIn(300);
+
+      // Start background music when playing
+      if (!this.audioSystem.isMusicPlaying()) {
+        this.audioSystem.startBackgroundMusic();
+      }
+    });
+
+    this.gameState.onStateChange(GameStates.PAUSED, () => {
+      this.pauseScreen.show();
+      this.touchControls.show();
+      // Music continues playing during pause
+    });
+
+    this.gameState.onStateChange(GameStates.GAME_OVER, () => {
+      this.triggerFlash();
+      this.gameOverScreen.show(
+        this.scoreSystem.getScore(),
+        this.scoreSystem.getHighScore()
+      );
+      this.menuScreen.updateHighScore(this.scoreSystem.getHighScore());
+      this.touchControls.hide();
+
+      // Stop background music on game over
+      this.audioSystem.stopBackgroundMusic();
+    });
+  }
+
+  private setupInputHandlers(): void {
+    // Keyboard handlers
+    window.addEventListener("keydown", (event) => {
+      if (event.key === " " || event.key === "Spacebar") {
+        event.preventDefault();
+        this.handleSpacePress();
+      } else if (event.key === "p" || event.key === "P") {
+        event.preventDefault();
+        this.handlePausePress();
+      } else if (event.key === "f" || event.key === "F") {
+        event.preventDefault();
+        this.toggleStats();
+      } else if (event.key === "m" || event.key === "M") {
+        event.preventDefault();
+        this.toggleMute();
+      }
+    });
+
+    // Touch handlers for mobile
+    this.setupTouchHandlers();
+  }
+
+  private setupTouchHandlers(): void {
+    let touchStartTime = 0;
+    let touchStartTarget: EventTarget | null = null;
+    const TAP_TIME_THRESHOLD = 200; // Maximum time for a tap (ms)
+
+    window.addEventListener("touchstart", (event) => {
+      touchStartTime = Date.now();
+      touchStartTarget = event.target;
+    });
+
+    window.addEventListener("touchend", (event) => {
+      const touchDuration = Date.now() - touchStartTime;
+
+      // Check if touch started on canvas
+      const touchedCanvas = touchStartTarget instanceof HTMLCanvasElement;
+
+      // Only trigger on quick taps on canvas for menu/game over screens
+      if (touchDuration < TAP_TIME_THRESHOLD && touchedCanvas) {
+        const currentState = this.gameState.getCurrentState();
+
+        // Only handle tap for menu and game over (no pause during gameplay)
+        if (
+          currentState === GameStates.MENU ||
+          currentState === GameStates.GAME_OVER
+        ) {
+          event.preventDefault();
+          this.handleSpacePress();
+        }
+      }
+
+      touchStartTarget = null;
+    });
+  }
+
+  private setupTouchControls(): void {
+    // Connect touch control buttons to input system
+    this.touchControls.onDirectionInput((direction) => {
+      const currentState = this.gameState.getCurrentState();
+      if (currentState === GameStates.PLAYING) {
+        // Directly set the viperdirection for immediate response
+        const currentDirection = this.viper.direction;
+
+        // Validate against 180-degree turns
+        if (
+          direction.x !== -currentDirection.x ||
+          direction.y !== -currentDirection.y
+        ) {
+          this.viper.setDirection(direction);
+        }
+      }
+    });
+
+    // Connect pause button
+    this.touchControls.onPauseInput(() => {
+      this.handlePausePress();
+    });
+  }
+
+  private toggleMute(): void {
+    this.audioSystem.toggleMute();
+    this.audioSystem.playUISound(); // Give audio feedback for toggle
+  }
+
+  private handleSpacePress(): void {
+    // Resume audio context on user interaction (required by browsers)
+    this.audioSystem.resumeAudioContext();
+
+    const currentState = this.gameState.getCurrentState();
+
+    if (currentState === GameStates.MENU) {
+      this.audioSystem.playUISound();
+      this.startNewGame();
+    } else if (currentState === GameStates.PAUSED) {
+      this.audioSystem.playUISound();
+      this.gameState.transition(GameStates.PLAYING);
+    } else if (currentState === GameStates.GAME_OVER) {
+      this.audioSystem.playUISound();
+      this.startNewGame();
+    }
+  }
+
+  private handlePausePress(): void {
+    const currentState = this.gameState.getCurrentState();
+
+    if (currentState === GameStates.PLAYING) {
+      this.audioSystem.playUISound();
+      this.gameState.transition(GameStates.PAUSED);
+      this.touchControls.setPauseButtonIcon(true); // Show play icon
+    } else if (currentState === GameStates.PAUSED) {
+      this.audioSystem.playUISound();
+      this.gameState.transition(GameStates.PLAYING);
+      this.touchControls.setPauseButtonIcon(false); // Show pause icon
+    }
+  }
+
+  private startNewGame(): void {
+    // Remove old entities from stage
+    if (this.viper) {
+      this.app.stage.removeChild(this.viper.container);
+      this.viper.container.destroy({ children: true });
+    }
+    if (this.food) {
+      this.app.stage.removeChild(this.food.container);
+      this.food.container.destroy({ children: true });
+    }
+
+    // Create new entities
+    this.viper= new Viper();
+    this.food = new Food();
+
+    // Reset game state
+    this.scoreSystem.reset();
+    this.inputSystem.clearBuffer();
+    this.elapsed = 0;
+    this.moveInterval = INITIAL_MOVE_INTERVAL;
+    this.foodCount = 0;
+
+    // Add new entities to stage
+    this.app.stage.addChild(this.viper.container);
+    this.app.stage.addChild(this.food.container);
+
+    // Spawn food avoiding snake
+    const occupied = this.collisionSystem.getOccupiedPositions(this.viper);
+    this.food.spawn(occupied);
+
+    // Start game
+    this.gameState.transition(GameStates.PLAYING);
+  }
+
+  private startGameLoop(): void {
+    this.app.ticker.add((ticker: Ticker) => {
+      this.update(ticker.deltaMS);
+    });
+  }
+
+  private update(deltaMS: number): void {
+    const currentState = this.gameState.getCurrentState();
+
+    // Update performance stats
+    if (this.showStats) {
+      this.stats.update();
+    }
+
+    // Calculate level and speed progress
+    const level = Math.floor(this.foodCount / FOOD_SPEED_THRESHOLD) + 1;
+    const speedProgress =
+      (INITIAL_MOVE_INTERVAL - this.moveInterval) /
+      (INITIAL_MOVE_INTERVAL - MIN_MOVE_INTERVAL);
+
+    // Update HUD
+    this.hud.update(
+      this.scoreSystem.getScore(),
+      this.scoreSystem.getHighScore(),
+      level,
+      speedProgress,
+      deltaMS
+    );
+
+    this.grid.update(deltaMS);
+    // Update food animation (runs in all states)
+    this.food.update(deltaMS);
+
+    // Update particle system (runs in all states)
+    this.particlePool.update(deltaMS);
+
+    // Update screen effects (runs in all states)
+    this.gameOverScreen.update(deltaMS);
+
+    // Only update game logic when playing
+    if (currentState !== GameStates.PLAYING) {
+      return;
+    }
+
+    // Fixed time-step update
+    this.elapsed += deltaMS;
+
+    if (this.elapsed >= this.moveInterval) {
+      this.elapsed -= this.moveInterval;
+      this.updateGameLogic();
+    }
+
+    // Interpolate viperposition for smooth movement
+    const progress = Math.min(this.elapsed / this.moveInterval, 1);
+    this.viper.interpolate(progress);
+  }
+
+  private updateGameLogic(): void {
+    // Process input
+    const newDirection = this.inputSystem.consumeInput(this.viper.direction);
+    this.viper.setDirection(newDirection);
+
+    // Move snake
+    this.viper.move();
+
+    // Check collisions
+    const head = this.viper.getHead();
+
+    // Wall collision
+    if (this.collisionSystem.checkWallCollision(head)) {
+      this.audioSystem.playCollisionSound();
+      this.triggerScreenShake(200, 8);
+      this.gameState.transition(GameStates.GAME_OVER);
+      return;
+    }
+
+    // Self collision
+    if (this.collisionSystem.checkSelfCollision(this.viper)) {
+      this.audioSystem.playCollisionSound();
+      this.triggerScreenShake(200, 8);
+      this.gameState.transition(GameStates.GAME_OVER);
+      return;
+    }
+
+    // Food collision
+    if (this.collisionSystem.checkFoodCollision(this.viper, this.food)) {
+      this.audioSystem.playEatSound();
+      this.viper.grow();
+      this.scoreSystem.addPoints();
+      this.foodCount++;
+
+      // Create particle burst at food position
+      const foodX = this.food.position.x * CELL_SIZE + CELL_SIZE / 2;
+      const foodY = this.food.position.y * CELL_SIZE + CELL_SIZE / 2;
+      this.particlePool.burst(foodX, foodY, 0x00f5ff, 16);
+
+      // Increase difficulty
+      if (this.foodCount % FOOD_SPEED_THRESHOLD === 0) {
+        this.moveInterval = Math.max(MIN_MOVE_INTERVAL, this.moveInterval - 10);
+        this.triggerFlash();
+      }
+
+      // Spawn new food
+      const occupied = this.collisionSystem.getOccupiedPositions(this.viper);
+      this.food.spawn(occupied);
+    }
+  }
+
+  private triggerScreenShake(duration: number, intensity: number): void {
+    this.screenShake.active = true;
+    this.screenShake.duration = duration;
+    this.screenShake.intensity = intensity;
+    this.screenShake.elapsed = 0;
+  }
+
+  private triggerFlash(): void {
+    this.flashOverlay.alpha = 0.6;
+  }
+
+  private fadeIn(duration: number): void {
+    this.fadeOverlay.alpha = 1;
+
+    // Gradually fade in
+    const fadeStep = 1 / (duration / 16); // Assuming 60fps
+    const fadeInterval = setInterval(() => {
+      this.fadeOverlay.alpha -= fadeStep;
+      if (this.fadeOverlay.alpha <= 0) {
+        this.fadeOverlay.alpha = 0;
+        clearInterval(fadeInterval);
+      }
+    }, 16);
+  }
+
+  private updateScreenEffects(deltaMS: number): void {
+    // Update screen shake
+    if (this.screenShake.active) {
+      this.screenShake.elapsed += deltaMS;
+
+      if (this.screenShake.elapsed >= this.screenShake.duration) {
+        // End shake - reset position
+        this.screenShake.active = false;
+        this.gameContainer.position.set(0, 0);
+      } else {
+        // Apply shake - random offset
+        const progress = this.screenShake.elapsed / this.screenShake.duration;
+        const currentIntensity = this.screenShake.intensity * (1 - progress); // Decrease over time
+
+        const offsetX = (Math.random() - 0.5) * currentIntensity * 2;
+        const offsetY = (Math.random() - 0.5) * currentIntensity * 2;
+
+        this.gameContainer.position.set(offsetX, offsetY);
+      }
+    }
+
+    // Update flash effect (fade out)
+    if (this.flashOverlay.alpha > 0) {
+      this.flashOverlay.alpha -= deltaMS * 0.003; // Fade out speed
+      if (this.flashOverlay.alpha < 0) {
+        this.flashOverlay.alpha = 0;
+      }
+    }
+  }
+}
