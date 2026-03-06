@@ -2,14 +2,14 @@
   <img src="public/logo.png" alt="ViperGrid Logo" width="250"/>
 </p>
 
-#            ViperGame - Claude 4.5 Sonnet Capability Test
+<h1 align="center">ViperGame - Claude 4.5 Sonnet Capability Test</h1>
 
 > **A fully vibe-coded project testing Claude 4.5 Sonnet's capabilities with Cursor** 🧪  
 > This is an experimental project to explore AI-assisted game development workflows!
 
 <div align="center">
 
-![PixiJS](https://img.shields.io/badge/PixiJS-8.13.2-ff0066?style=for-the-badge&logo=pixijs)
+![PixiJS](https://img.shields.io/badge/PixiJS-8.13.2-ff0066?style=for-the-badge)
 ![TypeScript](https://img.shields.io/badge/TypeScript-5.8.3-3178C6?style=for-the-badge&logo=typescript)
 ![Vite](https://img.shields.io/badge/Vite-7.1.7-646CFF?style=for-the-badge&logo=vite)
 ![Claude 4.5](https://img.shields.io/badge/Claude-4.5_Sonnet-8A2BE2?style=for-the-badge)
